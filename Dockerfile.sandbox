@@ -1,0 +1,18 @@
+
+FROM python:3.12-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+ENV PIP_NO_CACHE_DIR=1
+
+# Install pytest inside the image.
+RUN pip install --no-cache-dir pytest
+
+# Create a dedicated non-root user.
+RUN useradd --uid 10001 --create-home --shell /usr/sbin/nologin sandbox
+
+WORKDIR /workspace
+
+USER 10001:10001
+
+CMD ["python", "--version"]
