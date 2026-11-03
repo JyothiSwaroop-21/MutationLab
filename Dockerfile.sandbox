@@ -1,11 +1,18 @@
-
 FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 ENV PIP_NO_CACHE_DIR=1
 
-# Install pytest inside the image.
+# Install Python testing tools and other language runtimes.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    nodejs \
+    gcc \
+    g++ \
+    default-jdk-headless \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install pytest.
 RUN pip install --no-cache-dir pytest
 
 # Create a dedicated non-root user.
