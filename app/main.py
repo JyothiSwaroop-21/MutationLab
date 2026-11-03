@@ -12,8 +12,8 @@ from app.learning import detect_error
 
 app = FastAPI(
     title="MutationLab API",
-    description="AI-powered Python learning and mutation testing laboratory",
-    version="0.6.0",
+    description="Multi-language AI learning and Python mutation testing laboratory",
+    version="0.7.0",
 )
 
 
@@ -44,6 +44,7 @@ class ExperimentRequest(BaseModel):
 
 class LearningRequest(BaseModel):
     source_code: str
+    language: str = "python"
     mode: str = "guided"
 
 
@@ -52,10 +53,6 @@ class LearningRequest(BaseModel):
 # -------------------------
 
 def verify_generated_tests(source_code: str, investigation: dict) -> dict:
-    """
-    Verify generated tests against original and mutated source code.
-    """
-
     mutation_data = generate_mutants(source_code)
 
     if not mutation_data.get("success"):
@@ -94,8 +91,7 @@ def verify_generated_tests(source_code: str, investigation: dict) -> dict:
 
         matching_mutant = next(
             (
-                mutant
-                for mutant in mutants
+                mutant for mutant in mutants
                 if mutant.get("id") == mutant_id
             ),
             None,
@@ -120,24 +116,11 @@ def verify_generated_tests(source_code: str, investigation: dict) -> dict:
             continue
 
         try:
-            original_result = execute_test(
-                source_code,
-                generated_test,
-            )
+            original_result = execute_test(source_code, generated_test)
+            mutant_result = execute_test(mutated_code, generated_test)
 
-            mutant_result = execute_test(
-                mutated_code,
-                generated_test,
-            )
-
-            original_passed = (
-                original_result.get("status") == "passed"
-            )
-
-            mutant_failed = (
-                mutant_result.get("status") == "failed"
-            )
-
+            original_passed = original_result.get("status") == "passed"
+            mutant_failed = mutant_result.get("status") == "failed"
             verified = original_passed and mutant_failed
 
             verification_results.append({
@@ -145,8 +128,7 @@ def verify_generated_tests(source_code: str, investigation: dict) -> dict:
                 "verified": verified,
                 "status": (
                     "Verified successfully"
-                    if verified
-                    else "Verification failed"
+                    if verified else "Verification failed"
                 ),
                 "original_passed": original_passed,
                 "mutant_failed": mutant_failed,
@@ -162,10 +144,8 @@ def verify_generated_tests(source_code: str, investigation: dict) -> dict:
             })
 
     total = len(verification_results)
-
     verified_count = sum(
-        1 for item in verification_results
-        if item["verified"]
+        1 for item in verification_results if item["verified"]
     )
 
     return {
@@ -184,21 +164,26 @@ def verify_generated_tests(source_code: str, investigation: dict) -> dict:
 def home():
     return {
         "message": "Welcome to MutationLab API",
-        "version": "0.6.0",
+        "version": "0.7.0",
         "status": "running",
-        "platform": "Python Learning Laboratory",
+        "platform": "Multi-language Learning Laboratory",
+        "supported_languages": [
+            "python",
+            "javascript",
+            "c",
+            "cpp",
+            "java",
+        ],
     }
 
 
 @app.get("/health")
 def health():
-    return {
-        "status": "healthy",
-    }
+    return {"status": "healthy"}
 
 
 # -------------------------
-# EXISTING MUTATION FEATURES
+# EXISTING PYTHON MUTATION FEATURES
 # -------------------------
 
 @app.post("/analyze")
@@ -213,7 +198,6 @@ def mutate_code(request: CodeRequest):
 
 @app.post("/investigate")
 def investigate_code(request: ExperimentRequest):
-
     experiment = run_mutation_tests(
         request.source_code,
         request.test_code,
@@ -254,13 +238,13 @@ def investigate_code(request: ExperimentRequest):
 
 
 # -------------------------
-# NEW STUDENT LEARNING FEATURE
+# MULTI-LANGUAGE LEARNING API
 # -------------------------
 
 @app.post("/debug")
 def debug_code(request: LearningRequest):
-
     return detect_error(
-        request.source_code,
-        request.mode,
+        source_code=request.source_code,
+        mode=request.mode,
+        language=request.language,
     )

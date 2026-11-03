@@ -1,18 +1,60 @@
 
 import { useState } from "react";
 import {
-  Activity, Bug, CheckCircle2, Code2, FlaskConical,
-  Play, ShieldCheck, Sparkles, Terminal, XCircle,
-  GraduationCap, Lightbulb
+  Activity, AlertTriangle, ArrowRight, Bug, Check, CheckCircle2,
+  ChevronRight, Code2, Command, Cpu, FlaskConical, GraduationCap,
+  Lightbulb, Play, ShieldCheck, Sparkles, Terminal, XCircle, Zap
 } from "lucide-react";
 import "./App.css";
 
 const API = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
 
+type Language = "python" | "javascript" | "c" | "cpp" | "java";
+
+const languages: { id: Language; name: string; extension: string; version: string }[] = [
+  { id: "python", name: "Python", extension: "py", version: "3.12" },
+  { id: "javascript", name: "JavaScript", extension: "js", version: "Node 20" },
+  { id: "c", name: "C", extension: "c", version: "GCC 14" },
+  { id: "cpp", name: "C++", extension: "cpp", version: "G++ 14" },
+  { id: "java", name: "Java", extension: "java", version: "JDK 21" },
+];
+
+const starterCodes: Record<Language, string> = {
+  python: `numbers = [10, 20, 30]
+
+print(numbers[3])`,
+  javascript: `const numbers = [10, 20, 30];
+
+console.log(numbers[3].toString());`,
+  c: `#include <stdio.h>
+
+int main() {
+    int numbers[] = {10, 20, 30};
+    printf("%d\\n", numbers[3]);
+    return 0;
+}`,
+  cpp: `#include <iostream>
+using namespace std;
+
+int main() {
+    int numbers[] = {10, 20, 30};
+    cout << numbers[3] << endl;
+    return 0;
+}`,
+  java: `public class Main {
+    public static void main(String[] args) {
+        int[] numbers = {10, 20, 30};
+        System.out.println(numbers[3]);
+    }
+}`,
+};
+
 type LearningResult = {
   success: boolean;
   status?: string;
   message?: string;
+  language?: string;
+  output?: string;
   error?: {
     type: string;
     message: string;
@@ -45,7 +87,6 @@ type ApiResult = {
     results?: Mutant[];
   };
   investigation?: {
-    ai_used?: boolean;
     investigations?: {
       mutant_id?: string;
       reason?: string;
@@ -59,59 +100,76 @@ type ApiResult = {
   };
 };
 
-const DEFAULT_LEARNING_CODE = `numbers = [10, 20, 30]
-
-print(numbers[3])`;
-
-const DEFAULT_SOURCE = `def calculate_discount(price, discount):
+const starterSource = `def calculate_discount(price, discount):
     return price - (price * discount / 100)`;
 
-const DEFAULT_TESTS = `from subject import calculate_discount
+const starterTests = `from subject import calculate_discount
 
 def test_discount():
     result = calculate_discount(100, 10)
     assert result > 0`;
 
 function App() {
-  const [activeTab, setActiveTab] = useState("learning");
+  const [tab, setTab] = useState<"learning" | "mutation">("learning");
 
-  const [learningCode, setLearningCode] = useState(DEFAULT_LEARNING_CODE);
+  const [language, setLanguage] = useState<Language>("python");
+  const [code, setCode] = useState(starterCodes.python);
   const [mode, setMode] = useState("guided");
-  const [learningResult, setLearningResult] = useState<LearningResult | null>(null);
+  const [learning, setLearning] = useState<LearningResult | null>(null);
   const [learningLoading, setLearningLoading] = useState(false);
   const [learningError, setLearningError] = useState("");
 
-  const [sourceCode, setSourceCode] = useState(DEFAULT_SOURCE);
-  const [testCode, setTestCode] = useState(DEFAULT_TESTS);
-  const [mutationResult, setMutationResult] = useState<ApiResult | null>(null);
+  const [source, setSource] = useState(starterSource);
+  const [tests, setTests] = useState(starterTests);
+  const [mutation, setMutation] = useState<ApiResult | null>(null);
   const [mutationLoading, setMutationLoading] = useState(false);
   const [mutationError, setMutationError] = useState("");
+
+  const selectedLanguage = languages.find(item => item.id === language)!;
+  const lines = code.split("\n");
+
+  function changeLanguage(nextLanguage: Language) {
+    setLanguage(nextLanguage);
+    setCode(starterCodes[nextLanguage]);
+    setLearning(null);
+    setLearningError("");
+  }
 
   async function runLearning() {
     setLearningLoading(true);
     setLearningError("");
-    setLearningResult(null);
+    setLearning(null);
 
     try {
       const response = await fetch(`${API}/debug`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          source_code: learningCode,
-          mode
-        })
+          source_code: code,
+          language,
+          mode,
+        }),
       });
 
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.detail || "Could not analyze your code.");
+        throw new Error(data.detail || "Analysis failed.");
       }
 
-      setLearningResult(data);
+      if (data.status === "sandbox_error" || data.status === "ai_error") {
+        setLearning(data);
+        if (data.status === "sandbox_error") {
+          setLearningError(data.message || "Execution environment unavailable.");
+        }
+      } else {
+        setLearning(data);
+      }
     } catch (error) {
       setLearningError(
-        error instanceof Error ? error.message : "Backend connection failed."
+        error instanceof Error
+          ? error.message
+          : "Could not connect to the backend."
       );
     } finally {
       setLearningLoading(false);
@@ -121,16 +179,16 @@ function App() {
   async function runMutation() {
     setMutationLoading(true);
     setMutationError("");
-    setMutationResult(null);
+    setMutation(null);
 
     try {
       const response = await fetch(`${API}/investigate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          source_code: sourceCode,
-          test_code: testCode
-        })
+          source_code: source,
+          test_code: tests,
+        }),
       });
 
       const data = await response.json();
@@ -139,363 +197,563 @@ function App() {
         throw new Error(data.detail || "Mutation analysis failed.");
       }
 
-      setMutationResult(data);
+      setMutation(data);
     } catch (error) {
       setMutationError(
-        error instanceof Error ? error.message : "Backend connection failed."
+        error instanceof Error
+          ? error.message
+          : "Could not connect to the backend."
       );
     } finally {
       setMutationLoading(false);
     }
   }
 
-  const stats = mutationResult?.experiment?.summary;
-  const mutants = mutationResult?.experiment?.results ?? [];
-  const advice = mutationResult?.investigation?.investigations ?? [];
-  const verification = mutationResult?.generated_test_verification;
+  const stats = mutation?.experiment?.summary;
+  const mutants = mutation?.experiment?.results ?? [];
+  const advice = mutation?.investigation?.investigations ?? [];
+  const verification = mutation?.generated_test_verification;
 
   return (
     <div className="app-shell">
+      <div className="ambient ambient-one" />
+      <div className="ambient ambient-two" />
+
       <aside className="sidebar">
         <div className="brand">
-          <div className="brand-icon"><FlaskConical size={23} /></div>
-          <div>
-            <h2>MutationLab</h2>
-            <span>Python Learning Lab</span>
+          <div className="brand-mark"><FlaskConical size={22} /></div>
+          <div className="brand-name">
+            <strong>Mutation<span>Lab</span></strong>
+            <small>INTELLIGENCE WORKSPACE</small>
           </div>
         </div>
 
-        <div className="side-label">WORKSPACE</div>
+        <div className="sidebar-label">YOUR WORKSPACE</div>
 
         <button
-          className={`nav-item ${activeTab === "learning" ? "active" : ""}`}
-          onClick={() => setActiveTab("learning")}
+          className={`nav-item ${tab === "learning" ? "active" : ""}`}
+          onClick={() => setTab("learning")}
         >
-          <GraduationCap size={18} /> Learning Lab
+          <GraduationCap size={18} />
+          <span>Learning Lab</span>
+          {tab === "learning" && <ChevronRight size={15} className="nav-arrow" />}
         </button>
 
         <button
-          className={`nav-item ${activeTab === "mutation" ? "active" : ""}`}
-          onClick={() => setActiveTab("mutation")}
+          className={`nav-item ${tab === "mutation" ? "active" : ""}`}
+          onClick={() => setTab("mutation")}
         >
-          <Bug size={18} /> Mutation Testing
+          <Bug size={18} />
+          <span>Mutation Testing</span>
+          {tab === "mutation" && <ChevronRight size={15} className="nav-arrow" />}
         </button>
 
-        <div className="sidebar-bottom">
-          <div className="status-dot" />
-          <span>MutationLab Engine</span>
-          <span className="online">Ready</span>
+        <div className="sidebar-card">
+          <div className="sidebar-card-icon"><Zap size={17} /></div>
+          <strong>Build better code.</strong>
+          <p>Understand the why, not just the fix.</p>
+          <div className="sidebar-card-line" />
+          <small>LEARN · DEBUG · IMPROVE</small>
+        </div>
+
+        <div className="sidebar-footer">
+          <span className="online-dot" />
+          <span>Local engine</span>
+          <span className="ready-label">READY</span>
         </div>
       </aside>
 
       <main className="main-content">
         <header className="topbar">
-          <div>
-            <div className="breadcrumb">MutationLab / Workspace</div>
-            <h1>
-              {activeTab === "learning" ? "Python Learning Lab" : "Mutation Testing"}
-            </h1>
-            <p>
-              {activeTab === "learning"
-                ? "Understand your mistakes. Become a better programmer."
-                : "Discover weaknesses in your tests. Strengthen your code."}
-            </p>
+          <div className="breadcrumb">
+            <span>WORKSPACE</span>
+            <ChevronRight size={13} />
+            <strong>{tab === "learning" ? "Learning Lab" : "Mutation Testing"}</strong>
           </div>
-          <div className="version-tag">VERSION 0.6.0</div>
+          <div className="topbar-right">
+            <div className="system-status">
+              <span className="online-dot" /> SYSTEM ONLINE
+            </div>
+            <div className="version-tag">v0.7.0</div>
+          </div>
         </header>
 
-        {activeTab === "learning" && (
+        {tab === "learning" ? (
           <>
-            <section className="welcome-panel">
-              <div>
+            <section className="hero">
+              <div className="hero-copy">
                 <div className="eyebrow">
-                  <Sparkles size={15} /> GUIDED PYTHON LEARNING
+                  <Sparkles size={14} /> MULTI-LANGUAGE AI MENTOR
                 </div>
-                <h2>Don't just fix errors. Understand them.</h2>
+                <h1>Think like a <span>developer.</span><br />Debug like a pro.</h1>
                 <p>
-                  Write Python code, discover mistakes, and learn how to solve
-                  them with help from your AI tutor.
+                  Write code. Find the problem. Understand the concept.
+                  Become a better programmer, one bug at a time.
                 </p>
+                <div className="hero-pills">
+                  <span><Check size={13} /> Beginner friendly</span>
+                  <span><ShieldCheck size={13} /> Sandboxed execution</span>
+                  <span><Zap size={13} /> AI guided</span>
+                </div>
               </div>
-              <div className="welcome-icon">
-                <GraduationCap size={70} />
+
+              <div className="hero-art">
+                <div className="orbit orbit-a" />
+                <div className="orbit orbit-b" />
+                <div className="orbit orbit-c" />
+                <div className="core-glow"><FlaskConical size={54} /></div>
+                <span className="floating-code code-a">{"{ }"}</span>
+                <span className="floating-code code-b">{"</>"}</span>
+                <span className="floating-code code-c">01</span>
+              </div>
+              <div className="hero-index">01 <span>/ LEARN</span></div>
+            </section>
+
+            <div className="section-intro">
+              <div>
+                <div className="section-kicker">THE PLAYGROUND</div>
+                <h2>Your coding workspace</h2>
+                <p>Choose your language and experiment in an isolated environment.</p>
+              </div>
+              <div className="language-chip">
+                <span className="python-dot" /> {selectedLanguage.name.toUpperCase()}
+              </div>
+            </div>
+
+            <section className="language-selector-panel">
+              <div className="language-selector-heading">
+                <div>
+                  <span className="section-kicker">SELECT YOUR LANGUAGE</span>
+                  <h3>What are we coding today?</h3>
+                </div>
+                <span className="language-count">05 LANGUAGES</span>
+              </div>
+
+              <div className="language-options">
+                {languages.map(item => (
+                  <button
+                    key={item.id}
+                    className={`language-option ${language === item.id ? "selected" : ""}`}
+                    onClick={() => changeLanguage(item.id)}
+                    aria-pressed={language === item.id}
+                  >
+                    <span className="language-option-icon">
+                      {item.id === "python" ? "Py" :
+                        item.id === "javascript" ? "JS" :
+                          item.id === "cpp" ? "C+" :
+                            item.id === "java" ? "J" : "C"}
+                    </span>
+                    <span className="language-option-text">
+                      <strong>{item.name}</strong>
+                      <small>{item.version}</small>
+                    </span>
+                    {language === item.id && <CheckCircle2 size={17} />}
+                  </button>
+                ))}
               </div>
             </section>
 
-            <section className="editor-grid">
-              <div className="panel editor-panel">
-                <div className="panel-heading">
-                  <div><Code2 size={18} /><h3>Your Python Code</h3></div>
-                  <span>PYTHON</span>
+            <section className="workspace-grid">
+              <div className="editor-card">
+                <div className="window-bar">
+                  <div className="window-dots"><i /><i /><i /></div>
+                  <div className="file-tab">
+                    <Code2 size={13} /> main.{selectedLanguage.extension}
+                    <span className="unsaved-dot" />
+                  </div>
+                  <div className="window-meta">UTF-8 · {selectedLanguage.name.toUpperCase()}</div>
                 </div>
-                <textarea
-                  value={learningCode}
-                  onChange={e => setLearningCode(e.target.value)}
-                  spellCheck={false}
-                  aria-label="Your Python code"
-                />
+
+                <div className="editor-body">
+                  <div className="line-numbers">
+                    {lines.map((_, index) => <span key={index}>{index + 1}</span>)}
+                  </div>
+                  <textarea
+                    className="code-editor"
+                    value={code}
+                    onChange={event => {
+                      setCode(event.target.value);
+                      setLearning(null);
+                      setLearningError("");
+                    }}
+                    spellCheck={false}
+                    aria-label={`${selectedLanguage.name} code editor`}
+                    autoCapitalize="off"
+                    autoComplete="off"
+                    autoCorrect="off"
+                  />
+                </div>
+
+                <div className="editor-footer">
+                  <span><span className="online-dot" /> EDITOR READY</span>
+                  <span>{lines.length} LINES <i /> {code.length} CHARACTERS</span>
+                </div>
               </div>
 
-              <div className="panel editor-panel">
-                <div className="panel-heading">
-                  <div><Lightbulb size={18} /><h3>Learning Mode</h3></div>
+              <div className="tutor-card">
+                <div className="tutor-heading">
+                  <div className="tutor-avatar"><Sparkles size={19} /></div>
+                  <div>
+                    <strong>Mutation AI</strong>
+                    <small>Your personal coding mentor</small>
+                  </div>
+                  <span className="ai-live"><i /> LIVE</span>
                 </div>
 
-                <div style={{ padding: 18 }}>
-                  <label style={{ display: "block", marginBottom: 12 }}>
-                    How would you like MutationLab to help?
-                  </label>
+                <div className="tutor-content">
+                  <div className="tutor-welcome">
+                    <span className="tutor-greeting">HEY, DEVELOPER 👋</span>
+                    <h3>What are we<br />working on today?</h3>
+                    <p>
+                      I'll help you understand your {selectedLanguage.name} code,
+                      spot mistakes, and learn how to solve them.
+                    </p>
+                  </div>
 
-                  <label style={{ display: "flex", gap: 10, marginBottom: 18 }}>
-                    <input
-                      type="radio"
-                      name="mode"
-                      checked={mode === "guided"}
-                      onChange={() => setMode("guided")}
-                    />
-                    <span>
-                      <strong>Guided Learning</strong>
-                      <br />
-                      <small>Hints first. Learn to solve it yourself.</small>
-                    </span>
-                  </label>
+                  <div className="mode-title">CHOOSE YOUR LEARNING STYLE</div>
 
-                  <label style={{ display: "flex", gap: 10 }}>
-                    <input
-                      type="radio"
-                      name="mode"
-                      checked={mode === "solution"}
-                      onChange={() => setMode("solution")}
-                    />
-                    <span>
-                      <strong>Reveal Solution</strong>
-                      <br />
-                      <small>Show the correction and explain the changes.</small>
-                    </span>
-                  </label>
+                  <button
+                    className={`mode-option ${mode === "guided" ? "selected" : ""}`}
+                    onClick={() => setMode("guided")}
+                  >
+                    <div className="mode-icon"><Lightbulb size={17} /></div>
+                    <div><strong>Guide me</strong><small>Hints first. You solve it yourself.</small></div>
+                    <span className="mode-radio">{mode === "guided" && <i />}</span>
+                  </button>
+
+                  <button
+                    className={`mode-option ${mode === "solution" ? "selected" : ""}`}
+                    onClick={() => setMode("solution")}
+                  >
+                    <div className="mode-icon solution-icon"><CheckCircle2 size={17} /></div>
+                    <div><strong>Show me the solution</strong><small>See corrected code and explanations.</small></div>
+                    <span className="mode-radio">{mode === "solution" && <i />}</span>
+                  </button>
+
+                  <div className="tutor-tip">
+                    <Sparkles size={14} />
+                    <span><strong>Learning tip</strong> Try to understand the error before revealing the solution.</span>
+                  </div>
                 </div>
               </div>
             </section>
 
-            <div className="run-section">
-              <div className="run-description">
-                <strong>Ready to understand your code?</strong>
-                <span>MutationLab will analyze and safely execute your Python code.</span>
+            <section className="execute-bar">
+              <div className="execute-info">
+                <div className="execute-icon"><Terminal size={19} /></div>
+                <div>
+                  <strong>Ready when you are.</strong>
+                  <small>Run your {selectedLanguage.name} code and let your AI mentor inspect the result.</small>
+                </div>
               </div>
               <button
-                className="run-button"
+                className="execute-button"
                 onClick={runLearning}
-                disabled={learningLoading || !learningCode.trim()}
+                disabled={learningLoading || !code.trim()}
               >
                 {learningLoading
-                  ? <Activity size={18} className="spin" />
-                  : <Play size={18} />}
-                {learningLoading ? "Analyzing..." : "Analyze My Code"}
+                  ? <Activity size={17} className="spin" />
+                  : <Play size={17} fill="currentColor" />}
+                {learningLoading ? "ANALYZING..." : "RUN ANALYSIS"}
+                {!learningLoading && <ArrowRight size={16} />}
               </button>
-            </div>
+            </section>
 
             {learningError && (
-              <div className="error-message">
-                <XCircle size={19} /><span>{learningError}</span>
-              </div>
+              <div className="error-banner"><XCircle size={18} />{learningError}</div>
             )}
 
-            {learningResult && (
-              <section className="results-section">
-                <div className="section-heading">
-                  <div>
-                    <h2>Learning Report</h2>
-                    <p>Your Python analysis and AI tutor feedback</p>
-                  </div>
-                  <span className="result-badge">
-                    {learningResult.status === "success" ? "CODE PASSED" : "ANALYSIS COMPLETE"}
-                  </span>
+            <section className="output-section">
+              <div className="output-heading">
+                <div>
+                  <div className="section-kicker">LIVE FEEDBACK</div>
+                  <h2>Execution & intelligence</h2>
                 </div>
+                <span className="terminal-label"><Terminal size={14} /> OUTPUT CONSOLE</span>
+              </div>
 
-                {learningResult.status === "success" ? (
-                  <div className="panel advice-card">
-                    <h3><CheckCircle2 size={20} /> Your code ran successfully!</h3>
-                    <pre>{learningResult.execution?.output || "No output produced."}</pre>
+              {!learning && !learningError && !learningLoading && (
+                <div className="console-empty">
+                  <div className="empty-terminal"><Terminal size={25} /></div>
+                  <div>
+                    <strong>Waiting for your code...</strong>
+                    <p>Your execution results and AI tutor feedback will appear here.</p>
                   </div>
-                ) : (
-                  <>
-                    <div className="panel advice-card">
-                      <div className="advice-title">
-                        <Bug size={18} />
-                        <strong>{learningResult.error?.type || "Error detected"}</strong>
-                      </div>
-                      <p>{learningResult.error?.message}</p>
-                      {learningResult.error?.line && (
-                        <p>Line: {learningResult.error.line}</p>
-                      )}
-                    </div>
+                  <span className="console-cursor" />
+                </div>
+              )}
 
-                    {learningResult.explanation && (
-                      <div className="panel advice-card">
-                        <div className="advice-title">
-                          <Sparkles size={18} />
-                          <strong>AI Tutor Explanation</strong>
-                        </div>
-                        <pre style={{
-                          whiteSpace: "pre-wrap",
-                          fontFamily: "inherit",
-                          lineHeight: 1.7
-                        }}>
-                          {learningResult.explanation}
-                        </pre>
+              {learningLoading && (
+                <div className="console-empty loading-state">
+                  <div className="loading-orb"><Activity size={25} className="spin" /></div>
+                  <div>
+                    <strong>Inspecting your code</strong>
+                    <p>Executing safely and preparing your learning report...</p>
+                  </div>
+                </div>
+              )}
+
+              {learning?.status === "success" && (
+                <div className="result-panel success-panel">
+                  <div className="result-title">
+                    <CheckCircle2 size={20} />
+                    <strong>Execution successful</strong>
+                    <span className="result-tag success-tag">PASSED</span>
+                  </div>
+                  <pre>{learning.output || "Program completed without producing output."}</pre>
+                  <p>{learning.message || "Your code ran successfully."}</p>
+                </div>
+              )}
+
+              {learning && learning.status !== "success" && (
+                <div className="result-stack">
+                  <div className="result-panel error-panel">
+                    <div className="result-title">
+                      <AlertTriangle size={19} />
+                      <strong>{learning.error?.type || "Error detected"}</strong>
+                      <span className="result-tag error-tag">NEEDS ATTENTION</span>
+                    </div>
+                    <p>{learning.error?.message || learning.message}</p>
+                    {learning.error?.line && (
+                      <div className="error-location">
+                        LOCATION <strong>Line {learning.error.line}</strong>
                       </div>
                     )}
-                  </>
-                )}
-              </section>
-            )}
+                  </div>
 
-            {!learningResult && !learningError && (
-              <div className="empty-state">
-                <GraduationCap size={35} />
-                <h3>Your learning journey starts here</h3>
-                <p>Write some Python code and let MutationLab guide you.</p>
-              </div>
-            )}
+                  {learning.explanation && (
+                    <div className="result-panel ai-explanation">
+                      <div className="result-title">
+                        <div className="mini-ai"><Sparkles size={15} /></div>
+                        <strong>Your AI tutor explains</strong>
+                        <span className="result-tag ai-tag">GEMINI</span>
+                      </div>
+                      <pre>{learning.explanation}</pre>
+                    </div>
+                  )}
+
+                  {learning.status === "ai_error" && (
+                    <div className="error-banner">
+                      {learning.message || "AI explanation unavailable."}
+                    </div>
+                  )}
+
+                  {learning.status === "sandbox_error" && (
+                    <div className="error-banner">
+                      {learning.message || "The execution environment is unavailable."}
+                    </div>
+                  )}
+                </div>
+              )}
+            </section>
           </>
-        )}
-
-        {activeTab === "mutation" && (
+        ) : (
           <>
-            <section className="welcome-panel">
+            <section className="hero mutation-hero">
+              <div className="hero-copy">
+                <div className="eyebrow"><ShieldCheck size={14} /> INTELLIGENT SOFTWARE TESTING</div>
+                <h1>Don't just test code.<br /><span>Challenge it.</span></h1>
+                <p>Mutation testing reveals whether your test suite catches real bugs—or lets them slip through.</p>
+                <div className="hero-pills">
+                  <span><Check size={13} /> Mutation analysis</span>
+                  <span><ShieldCheck size={13} /> Docker sandbox</span>
+                  <span><Zap size={13} /> AI investigation</span>
+                </div>
+              </div>
+              <div className="hero-art mutation-art">
+                <div className="orbit orbit-a" />
+                <div className="orbit orbit-b" />
+                <div className="orbit orbit-c" />
+                <div className="core-glow"><Bug size={54} /></div>
+                <span className="floating-code code-a">MUT</span>
+                <span className="floating-code code-b">!</span>
+                <span className="floating-code code-c">02</span>
+              </div>
+              <div className="hero-index">02 <span>/ TEST</span></div>
+            </section>
+
+            <div className="section-intro">
               <div>
-                <div className="eyebrow"><ShieldCheck size={15} /> INTELLIGENT TESTING</div>
-                <h2>Break your code to build stronger tests.</h2>
-                <p>Generate mutations and investigate weaknesses with AI.</p>
+                <div className="section-kicker">MUTATION WORKBENCH</div>
+                <h2>Put your tests to the test</h2>
+                <p>Provide your Python function and its pytest test suite.</p>
               </div>
-              <div className="welcome-icon"><ShieldCheck size={70} /></div>
-            </section>
-
-            <section className="editor-grid">
-              <div className="panel editor-panel">
-                <div className="panel-heading">
-                  <div><Code2 size={18} /><h3>Source Code</h3></div>
-                  <span>PYTHON</span>
-                </div>
-                <textarea
-                  value={sourceCode}
-                  onChange={e => setSourceCode(e.target.value)}
-                  spellCheck={false}
-                />
-              </div>
-
-              <div className="panel editor-panel">
-                <div className="panel-heading">
-                  <div><Terminal size={18} /><h3>Test Suite</h3></div>
-                  <span>PYTEST</span>
-                </div>
-                <textarea
-                  value={testCode}
-                  onChange={e => setTestCode(e.target.value)}
-                  spellCheck={false}
-                />
-              </div>
-            </section>
-
-            <div className="run-section">
-              <div className="run-description">
-                <strong>Ready to test your code?</strong>
-                <span>Tests execute inside Docker.</span>
-              </div>
-              <button
-                className="run-button"
-                onClick={runMutation}
-                disabled={mutationLoading || !sourceCode.trim() || !testCode.trim()}
-              >
-                {mutationLoading ? <Activity size={18} className="spin" /> : <Play size={18} />}
-                {mutationLoading ? "Running..." : "Run Analysis"}
-              </button>
+              <div className="language-chip"><span className="python-dot" /> PYTHON + PYTEST</div>
             </div>
 
+            <section className="workspace-grid mutation-workspace">
+              <div className="editor-card">
+                <div className="window-bar">
+                  <div className="window-dots"><i /><i /><i /></div>
+                  <div className="file-tab"><Code2 size={13} /> subject.py</div>
+                  <div className="window-meta">SOURCE</div>
+                </div>
+                <textarea
+                  className="mutation-editor"
+                  value={source}
+                  onChange={event => setSource(event.target.value)}
+                  spellCheck={false}
+                  aria-label="Source code"
+                />
+              </div>
+
+              <div className="editor-card">
+                <div className="window-bar">
+                  <div className="window-dots"><i /><i /><i /></div>
+                  <div className="file-tab"><Terminal size={13} /> test_subject.py</div>
+                  <div className="window-meta">PYTEST</div>
+                </div>
+                <textarea
+                  className="mutation-editor"
+                  value={tests}
+                  onChange={event => setTests(event.target.value)}
+                  spellCheck={false}
+                  aria-label="Test code"
+                />
+              </div>
+            </section>
+
+            <section className="execute-bar">
+              <div className="execute-info">
+                <div className="execute-icon"><FlaskConical size={19} /></div>
+                <div>
+                  <strong>Launch mutation experiment</strong>
+                  <small>Generate mutants, run tests, and investigate survivors.</small>
+                </div>
+              </div>
+              <button
+                className="execute-button"
+                onClick={runMutation}
+                disabled={mutationLoading || !source.trim() || !tests.trim()}
+              >
+                {mutationLoading
+                  ? <Activity size={17} className="spin" />
+                  : <Play size={17} fill="currentColor" />}
+                {mutationLoading ? "RUNNING..." : "RUN EXPERIMENT"}
+                {!mutationLoading && <ArrowRight size={16} />}
+              </button>
+            </section>
+
             {mutationError && (
-              <div className="error-message">
-                <XCircle size={19} /><span>{mutationError}</span>
+              <div className="error-banner"><XCircle size={18} />{mutationError}</div>
+            )}
+
+            {mutationLoading && (
+              <div className="console-empty loading-state">
+                <div className="loading-orb"><Activity size={25} className="spin" /></div>
+                <div>
+                  <strong>Mutation experiment in progress</strong>
+                  <p>Running your tests against generated code mutations...</p>
+                </div>
               </div>
             )}
 
-            {mutationResult && (
-              <section className="results-section">
-                <div className="section-heading">
-                  <div><h2>Experiment Results</h2><p>Mutation testing summary</p></div>
-                  <span className="result-badge">ANALYSIS COMPLETE</span>
+            {mutation && (
+              <>
+                <div className="section-intro results-intro">
+                  <div>
+                    <div className="section-kicker">EXPERIMENT REPORT</div>
+                    <h2>Your mutation results</h2>
+                    <p>Here's how effectively your tests detect unexpected changes.</p>
+                  </div>
+                  <span className="result-tag success-tag">COMPLETE</span>
                 </div>
 
-                <div className="stats-grid">
-                  <div className="stat-card">
-                    <span>Mutation Score</span>
-                    <strong>{(stats?.mutation_score ?? 0).toFixed(2)}%</strong>
-                  </div>
-                  <div className="stat-card">
-                    <span>Total Mutants</span>
-                    <strong>{stats?.total_mutants ?? 0}</strong>
-                  </div>
-                  <div className="stat-card">
-                    <span>Killed</span>
-                    <strong>{stats?.killed ?? 0}</strong>
-                  </div>
-                  <div className="stat-card">
-                    <span>Survived</span>
-                    <strong>{stats?.survived ?? 0}</strong>
-                  </div>
-                </div>
-
-                <div className="panel table-panel">
-                  <div className="panel-heading">
-                    <div><Bug size={18} /><h3>Mutation Report</h3></div>
-                  </div>
-                  <div className="table-scroll">
-                    <table>
-                      <thead>
-                        <tr><th>Mutant</th><th>Mutation</th><th>Status</th></tr>
-                      </thead>
-                      <tbody>
-                        {mutants.map(mutant => (
-                          <tr key={mutant.id}>
-                            <td>{mutant.id}</td>
-                            <td>{mutant.original_operator} → {mutant.mutated_operator}</td>
-                            <td>{mutant.status.toUpperCase()}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-
-                <section className="ai-section">
-                  <div className="section-heading">
-                    <div><h2><Sparkles size={21} /> AI Investigator</h2></div>
-                    <span className="ai-badge">GEMINI</span>
-                  </div>
-                  {advice.map((item, index) => (
-                    <div className="panel advice-card" key={item.mutant_id ?? index}>
-                      <strong>{item.mutant_id}</strong>
-                      <p>{item.reason}</p>
-                      {item.suggestion && <p>{item.suggestion}</p>}
+                <section className="stats-grid">
+                  <div className="stat-card score-card">
+                    <span>MUTATION SCORE</span>
+                    <strong>{(stats?.mutation_score ?? 0).toFixed(2)}<small>%</small></strong>
+                    <div className="stat-track">
+                      <i style={{ width: `${Math.max(0, Math.min(100, stats?.mutation_score ?? 0))}%` }} />
                     </div>
-                  ))}
+                  </div>
+                  <div className="stat-card">
+                    <span>TOTAL MUTANTS</span>
+                    <strong>{stats?.total_mutants ?? 0}</strong>
+                    <small>Generated changes</small>
+                  </div>
+                  <div className="stat-card">
+                    <span>KILLED</span>
+                    <strong className="green-number">{stats?.killed ?? 0}</strong>
+                    <small>Caught by your tests</small>
+                  </div>
+                  <div className="stat-card">
+                    <span>SURVIVED</span>
+                    <strong className="red-number">{stats?.survived ?? 0}</strong>
+                    <small>Escaped detection</small>
+                  </div>
                 </section>
 
-                <div className="panel verification-panel">
-                  <div className="panel-heading">
-                    <div><ShieldCheck size={19} /><h3>Generated Test Verification</h3></div>
+                <section className="report-card">
+                  <div className="report-heading">
+                    <div><Bug size={18} /><strong>Mutation report</strong></div>
+                    <span>{mutants.length} MUTANTS</span>
                   </div>
-                  <div className="verification-content">
-                    <strong>{verification?.verified ?? 0} / {verification?.total ?? 0}</strong>
-                    <span>{verification?.success ? "Verification successful" : "Check results"}</span>
+                  {mutants.length ? mutants.map(mutant => (
+                    <div className="mutant-row" key={mutant.id}>
+                      <div>
+                        <strong>{mutant.id}</strong>
+                        <small>{mutant.original_operator} → {mutant.mutated_operator}</small>
+                      </div>
+                      <span className={`mutant-status ${mutant.status.toLowerCase()}`}>
+                        {mutant.status.toUpperCase()}
+                      </span>
+                    </div>
+                  )) : <p className="no-data">No mutants were returned for this experiment.</p>}
+                </section>
+
+                <section className="report-card ai-report">
+                  <div className="report-heading">
+                    <div><Sparkles size={18} /><strong>AI Investigator</strong></div>
+                    <span>GEMINI</span>
                   </div>
+                  {advice.length ? advice.map((item, index) => (
+                    <div className="investigation" key={item.mutant_id ?? index}>
+                      <strong>{item.mutant_id || "Surviving mutant"}</strong>
+                      <p>{item.reason}</p>
+                      {item.suggestion && (
+                        <div className="investigation-tip">
+                          <Lightbulb size={15} />{item.suggestion}
+                        </div>
+                      )}
+                    </div>
+                  )) : <p className="no-data">No AI investigation details were returned.</p>}
+                </section>
+
+                <section className="verification-card">
+                  <div className="verification-icon"><ShieldCheck size={21} /></div>
+                  <div>
+                    <strong>Generated test verification</strong>
+                    <p>
+                      {verification?.success
+                        ? "Generated tests passed verification."
+                        : "Review the verification details from this experiment."}
+                    </p>
+                  </div>
+                  <div className="verification-count">
+                    {verification?.verified ?? 0}
+                    <small> / {verification?.total ?? 0} verified</small>
+                  </div>
+                </section>
+              </>
+            )}
+
+            {!mutation && !mutationLoading && !mutationError && (
+              <div className="console-empty">
+                <div className="empty-terminal"><Cpu size={25} /></div>
+                <div>
+                  <strong>Your experiment starts here</strong>
+                  <p>Run a mutation experiment to see the report, AI investigation, and test verification.</p>
                 </div>
-              </section>
+              </div>
             )}
           </>
         )}
 
-        <footer>
-          MutationLab <span>•</span> Understand. Debug. Learn. Improve.
+        <footer className="app-footer">
+          <div className="footer-brand"><FlaskConical size={15} /> MUTATIONLAB</div>
+          <span>Understand. Debug. Learn. Improve.</span>
+          <span className="footer-version"><Command size={12} /> BUILT FOR DEVELOPERS</span>
         </footer>
       </main>
     </div>
