@@ -7,13 +7,15 @@ from app.analyzer import analyze_python_code
 from app.mutator import generate_mutants
 from app.runner import run_mutation_tests, execute_test
 from app.investigator import investigate_survivors
+from app.learning import detect_error
 
 
 app = FastAPI(
     title="MutationLab API",
-    description="AI-powered software mutation testing laboratory",
-    version="0.5.0",
+    description="AI-powered Python learning and mutation testing laboratory",
+    version="0.6.0",
 )
+
 
 app.add_middleware(
     CORSMiddleware,
@@ -27,6 +29,10 @@ app.add_middleware(
 )
 
 
+# -------------------------
+# REQUEST MODELS
+# -------------------------
+
 class CodeRequest(BaseModel):
     source_code: str
 
@@ -36,14 +42,18 @@ class ExperimentRequest(BaseModel):
     test_code: str
 
 
+class LearningRequest(BaseModel):
+    source_code: str
+    mode: str = "guided"
+
+
+# -------------------------
+# GENERATED TEST VERIFICATION
+# -------------------------
+
 def verify_generated_tests(source_code: str, investigation: dict) -> dict:
     """
-    Verify generated tests by running each against:
-    1. The original source code.
-    2. Its corresponding mutated source code.
-
-    A test is verified only when the original passes
-    and the corresponding mutant fails.
+    Verify generated tests against original and mutated source code.
     """
 
     mutation_data = generate_mutants(source_code)
@@ -59,7 +69,6 @@ def verify_generated_tests(source_code: str, investigation: dict) -> dict:
 
     mutants = mutation_data.get("mutants", [])
 
-    # The investigator's actual response uses "investigations".
     advice_items = investigation.get(
         "investigations",
         investigation.get("advice", []),
@@ -121,7 +130,6 @@ def verify_generated_tests(source_code: str, investigation: dict) -> dict:
                 generated_test,
             )
 
-            # runner.py returns status strings, not Boolean fields.
             original_passed = (
                 original_result.get("status") == "passed"
             )
@@ -154,9 +162,9 @@ def verify_generated_tests(source_code: str, investigation: dict) -> dict:
             })
 
     total = len(verification_results)
+
     verified_count = sum(
-        1
-        for item in verification_results
+        1 for item in verification_results
         if item["verified"]
     )
 
@@ -168,14 +176,30 @@ def verify_generated_tests(source_code: str, investigation: dict) -> dict:
     }
 
 
+# -------------------------
+# BASIC API
+# -------------------------
+
 @app.get("/")
 def home():
     return {
         "message": "Welcome to MutationLab API",
-        "version": "0.5.0",
+        "version": "0.6.0",
         "status": "running",
+        "platform": "Python Learning Laboratory",
     }
 
+
+@app.get("/health")
+def health():
+    return {
+        "status": "healthy",
+    }
+
+
+# -------------------------
+# EXISTING MUTATION FEATURES
+# -------------------------
 
 @app.post("/analyze")
 def analyze_code(request: CodeRequest):
@@ -190,7 +214,6 @@ def mutate_code(request: CodeRequest):
 @app.post("/investigate")
 def investigate_code(request: ExperimentRequest):
 
-    # Step 1: Run the mutation-testing experiment.
     experiment = run_mutation_tests(
         request.source_code,
         request.test_code,
@@ -212,15 +235,12 @@ def investigate_code(request: ExperimentRequest):
             },
         }
 
-    # Step 2: Investigate surviving mutants.
-    # Correct argument order: experiment results first.
     investigation = investigate_survivors(
         experiment,
         request.source_code,
         request.test_code,
     )
 
-    # Step 3: Verify generated tests against original and mutant code.
     generated_test_verification = verify_generated_tests(
         request.source_code,
         investigation,
@@ -231,3 +251,16 @@ def investigate_code(request: ExperimentRequest):
         "investigation": investigation,
         "generated_test_verification": generated_test_verification,
     }
+
+
+# -------------------------
+# NEW STUDENT LEARNING FEATURE
+# -------------------------
+
+@app.post("/debug")
+def debug_code(request: LearningRequest):
+
+    return detect_error(
+        request.source_code,
+        request.mode,
+    )
